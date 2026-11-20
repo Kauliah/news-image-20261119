@@ -1,222 +1,235 @@
 #!/usr/bin/env python3
 """Draw the 19 November 2026 world-news image (1024x1024 PNG).
 
-Broadsheet layout: a navy masthead with the date, then six story panels in
-a 2x3 grid, one per verified story of the day, each with a simple geometric
-icon, a region tag, a short headline and one factual line. Flat colours only,
-so the file stays small and every word stays legible when the image is shrunk.
-All six stories were verified against at least two independent sources and
-confirmed to have happened, or to have been first reported, on Thursday
-19 November 2026.
+Fresh build: navy masthead + 2x3 panel grid, each panel with a hand-drawn
+PIL icon, a self-contained headline and the key fact.
 """
-import math
-import os
 from PIL import Image, ImageDraw, ImageFont
 
 W, H = 1024, 1024
-CREAM = (246, 241, 231)
-NAVY = (20, 38, 62)
-NAVY_LIGHT = (168, 192, 220)
-INK = (20, 38, 62)
-GREY = (74, 85, 104)
-CARD = (255, 255, 255)
-BORDER = (216, 210, 196)
+OUT = "entry.png"
 
-FONT_DIR = "/usr/share/fonts/truetype/dejavu"
-BOLD = os.path.join(FONT_DIR, "DejaVuSans-Bold.ttf")
-REG = os.path.join(FONT_DIR, "DejaVuSans.ttf")
+PAPER = (247, 243, 234)
+NAVY = (20, 33, 61)
+GOLD = (201, 162, 39)
+INK = (24, 24, 28)
+GREY = (74, 74, 82)
+WHITE = (255, 255, 255)
+FOOT_BG = (20, 33, 61)
+
+SANS = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+SANS_B = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+SERIF_B = "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf"
 
 
 def font(path, size):
     return ImageFont.truetype(path, size)
 
 
-def fit(draw, text, path, size, max_w):
-    """Largest font size at or below `size` that fits `max_w`."""
-    while size > 12:
-        f = font(path, size)
-        if draw.textlength(text, font=f) <= max_w:
-            return f
-        size -= 2
-    return font(path, 12)
-
-
-def wrap(draw, text, f, max_w, max_lines=3):
-    """Split text into lines that fit max_w."""
+def wrap(draw, text, fnt, max_w):
+    """Greedy word wrap by pixel width; returns list of lines."""
     words = text.split()
     lines, cur = [], ""
-    for w in words:
-        trial = (cur + " " + w).strip()
-        if draw.textlength(trial, font=f) <= max_w:
+    for word in words:
+        trial = (cur + " " + word).strip()
+        if draw.textlength(trial, font=fnt) <= max_w:
             cur = trial
         else:
-            lines.append(cur)
-            cur = w
+            if cur:
+                lines.append(cur)
+            cur = word
     if cur:
         lines.append(cur)
-    return lines[:max_lines]
+    return lines
 
 
-# --- icons: simple geometric drawings, one per story -----------------------
-
-def icon_summit(d, x, y, s, color):
-    # three flags over a table with three seats
-    flag_colors = [(200, 60, 50), (40, 90, 160), (180, 140, 40)]
-    for i, fc in enumerate(flag_colors):
-        px = x + 14 + i * 34
-        d.line([(px, y + 12), (px, y + 66)], fill=color, width=4)
-        d.polygon([(px, y + 12), (px + 26, y + 20), (px, y + 28)], fill=fc)
-    d.rectangle([x + 6, y + 72, x + s - 6, y + 80], fill=color)
-    for i in range(3):
-        cx = x + 26 + i * 34
-        d.ellipse([cx - 8, y + 84, cx + 8, y + 100], fill=color)
+def centre(draw, cx, y, text, fnt, fill):
+    draw.text((cx - draw.textlength(text, font=fnt) / 2, y), text,
+              font=fnt, fill=fill)
 
 
-def icon_scales(d, x, y, s, color):
-    # scales of justice: pillar, beam, two pans
-    cx = x + s // 2
-    d.rectangle([cx - 4, y + 10, cx + 4, y + 78], fill=color)
-    d.polygon([(cx - 6, y + 6), (cx + 6, y + 6), (cx, y - 2)], fill=color)
-    d.line([(cx - 42, y + 22), (cx + 42, y + 22)], fill=color, width=5)
-    for dx in (-42, 42):
-        d.line([(cx + dx, y + 22), (cx + dx, y + 48)], fill=color, width=3)
-        d.polygon([(cx + dx - 22, y + 48), (cx + dx + 22, y + 48),
-                   (cx + dx, y + 72)], fill=color)
-    d.rectangle([cx - 26, y + 78, cx + 26, y + 86], fill=color)
-    d.rectangle([cx - 34, y + 86, cx + 34, y + 94], fill=color)
+# ---------------------------------------------------------------- icons
+def icon_globe(d, cx, cy, r, col):
+    d.ellipse([cx - r, cy - r, cx + r, cy + r], outline=col, width=5)
+    d.ellipse([cx - r * 0.45, cy - r, cx + r * 0.45, cy + r],
+              outline=col, width=3)
+    d.line([cx - r, cy, cx + r, cy], fill=col, width=3)
+    d.arc([cx - r, cy - r * 0.55, cx + r, cy + r * 0.55],
+          0, 360, fill=col, width=3)
+    d.arc([cx - r, cy - r * 0.95, cx + r, cy + r * 0.95],
+          200, 340, fill=col, width=3)
+    d.arc([cx - r, cy - r * 0.95, cx + r, cy + r * 0.95],
+          20, 160, fill=col, width=3)
 
 
-def icon_bridge_broken(d, x, y, s, color):
-    # deck with a collapsed middle span, two towers, water
-    d.line([(x, y + 56), (x + 34, y + 56)], fill=color, width=6)
-    d.line([(x + s - 34, y + 56), (x + s, y + 56)], fill=color, width=6)
-    d.line([(x + 34, y + 56), (x + s // 2, y + 82)], fill=color, width=6)
-    d.line([(x + s // 2, y + 82), (x + s - 34, y + 56)], fill=color, width=6)
-    d.rectangle([x + 14, y + 12, x + 22, y + 56], fill=color)
-    d.rectangle([x + s - 22, y + 12, x + s - 14, y + 56], fill=color)
-    d.line([(x + 18, y + 12), (x + s // 2, y + 56)], fill=color, width=3)
-    d.line([(x + s - 18, y + 12), (x + s // 2, y + 56)], fill=color, width=3)
-    for wy in (92, 102):
-        d.line([(x, y + wy), (x + s, y + wy)], fill=color, width=3)
+def icon_scales(d, cx, cy, r, col):
+    # pillar
+    d.line([cx, cy - r, cx, cy + r], fill=col, width=5)
+    d.line([cx - r * 0.7, cy + r, cx + r * 0.7, cy + r], fill=col, width=5)
+    # beam
+    d.line([cx - r, cy - r * 0.55, cx + r, cy - r * 0.55], fill=col, width=5)
+    d.ellipse([cx - 5, cy - r - 5, cx + 5, cy - r + 5], fill=col)
+    for sx in (-1, 1):
+        px = cx + sx * r * 0.82
+        top = cy - r * 0.55
+        d.line([px, top, px - 14, top + 26], fill=col, width=3)
+        d.line([px, top, px + 14, top + 26], fill=col, width=3)
+        d.arc([px - 20, top + 12, px + 20, top + 44], 0, 180, fill=col, width=4)
 
 
-def icon_chart(d, x, y, s, color):
-    # rising line chart with an arrowhead and a baseline
-    pts = [(x + 8, y + 78), (x + 30, y + 62), (x + 48, y + 68),
-           (x + 68, y + 40), (x + 92, y + 18)]
-    d.line(pts, fill=color, width=6, joint="curve")
-    d.polygon([(x + 92, y + 18), (x + 74, y + 14), (x + 84, y + 34)],
-              fill=color)
-    d.line([(x + 8, y + 92), (x + s - 8, y + 92)], fill=color, width=4)
-    for px, py in pts:
-        d.ellipse([px - 4, py - 4, px + 4, py + 4], fill=color)
+def icon_bridge(d, cx, cy, r, col):
+    # deck
+    d.line([cx - r, cy + r * 0.45, cx + r, cy + r * 0.45], fill=col, width=6)
+    # two pylons
+    for px in (cx - r * 0.55, cx + r * 0.55):
+        d.line([px, cy - r * 0.8, px, cy + r * 0.45], fill=col, width=5)
+    # cables from pylon tops to mid-deck
+    d.line([cx - r * 0.55, cy - r * 0.8, cx - r * 0.1, cy + r * 0.45],
+           fill=col, width=3)
+    d.line([cx + r * 0.55, cy - r * 0.8, cx + r * 0.1, cy + r * 0.45],
+           fill=col, width=3)
+    # red zigzag crack splitting the deck at the centre
+    d.line([(cx - 10, cy + r * 0.45 - 8), (cx - 2, cy + r * 0.45 + 2),
+            (cx - 8, cy + r * 0.45 + 12), (cx + 2, cy + r * 0.45 + 22)],
+           fill=(198, 40, 40), width=4, joint="curve")
+    # small red burst above the crack
+    import math
+    bx, by = cx, cy - r * 0.25
+    for ang in (0, 60, 120, 180, 240, 300):
+        x2 = bx + 13 * math.cos(math.radians(ang))
+        y2 = by + 13 * math.sin(math.radians(ang))
+        d.line([bx, by, x2, y2], fill=(198, 40, 40), width=3)
+    d.ellipse([bx - 4, by - 4, bx + 4, by + 4], fill=(198, 40, 40))
 
 
-def icon_probe(d, x, y, s, color):
-    # deep-space probe: dish, body, antenna, signal waves
-    cx, cy = x + s // 2, y + s // 2 - 6
-    d.line([(cx - 34, cy - 26), (cx + 34, cy + 26)], fill=color, width=5)
-    d.line([(cx - 34, cy + 26), (cx + 34, cy - 26)], fill=color, width=5)
-    d.ellipse([cx - 14, cy - 14, cx + 14, cy + 14], fill=color)
-    d.ellipse([cx - 5, cy - 5, cx + 5, cy + 5], fill=(255, 255, 255))
-    d.line([(cx, cy - 14), (cx, cy - 44)], fill=color, width=4)
-    d.ellipse([cx - 4, cy - 50, cx + 4, cy - 42], fill=color)
-    for r in (34, 46):
-        d.arc([cx - r, cy - r - 30, cx + r, cy + r - 30], 200, 340,
-              fill=color, width=4)
+def icon_chart(d, cx, cy, r, col):
+    d.line([cx - r, cy + r * 0.7, cx + r, cy + r * 0.7], fill=col, width=4)
+    d.line([cx - r, cy + r * 0.7, cx - r, cy - r], fill=col, width=4)
+    pts = [(cx - r + 4, cy + r * 0.45), (cx - r * 0.35, cy + r * 0.1),
+           (cx, cy + r * 0.35), (cx + r * 0.4, cy - r * 0.25),
+           (cx + r - 6, cy - r * 0.7)]
+    d.line(pts, fill=col, width=5, joint="curve")
+    ax, ay = pts[-1]
+    # dollar mark tucked in the top-left corner, clear of the arrow
+    d.text((cx - r + 2, cy - r - 2), chr(36), font=font(SANS_B, 22),
+           fill=col)
 
 
-def icon_cyclone(d, x, y, s, color):
-    # spiral storm: concentric arcs tightening to the eye
-    cx, cy = x + s // 2, y + s // 2
-    for i, r in enumerate((46, 36, 26, 16)):
-        start = 20 + i * 55
-        d.arc([cx - r, cy - r, cx + r, cy + r], start, start + 300,
-              fill=color, width=6)
-    d.ellipse([cx - 7, cy - 7, cx + 7, cy + 7], fill=color)
+def icon_probe(d, cx, cy, r, col):
+    # stars
+    for sx, sy in [(cx - r, cy - r * 0.8), (cx + r * 0.85, cy - r * 0.55),
+                   (cx + r * 0.6, cy + r * 0.9), (cx - r * 0.7, cy + r * 0.75)]:
+        d.ellipse([sx - 3, sy - 3, sx + 3, sy + 3], fill=col)
+    # dish: wide open arc facing up-left
+    d.arc([cx - 44, cy - 34, cx - 4, cy + 6], 90, 270, fill=col, width=5)
+    d.line([cx - 24, cy - 14, cx - 6, cy + 4], fill=col, width=4)
+    # body: a clear diamond
+    d.polygon([(cx + 2, cy - 16), (cx + 24, cy + 2), (cx + 2, cy + 20),
+               (cx - 16, cy + 2)], fill=col)
+    # antenna from the body to the top-right + signal arcs
+    d.line([cx + 20, cy - 6, cx + 40, cy - 24], fill=col, width=3)
+    for rr in (7, 15):
+        d.arc([cx + 40 - rr, cy - 24 - rr, cx + 40 + rr, cy - 24 + rr],
+              -70, 50, fill=col, width=3)
 
 
-STORIES = [
-    ("ASIA-PACIFIC · DIPLOMACY", (40, 90, 160),
-     "TRUMP, XI AND PUTIN MEET IN SHENZHEN",
-     "First three-way summit; leaders pledge talks to cut nuclear risks.",
-     icon_summit),
-    ("THE HAGUE · LAW", (107, 70, 193),
-     "MYANMAR GUILTY OF GENOCIDE",
-     "UN court rules 9-6 on the 2017 Rohingya campaign; orders reparations.",
-     icon_scales),
-    ("EUROPE · WAR", (150, 80, 30),
-     "CRIMEA BRIDGE HIT AGAIN",
-     "Third strike this week; rail track damaged, Putin vows a harsh reply.",
-     icon_bridge_broken),
-    ("AMERICAS · BUSINESS", (39, 103, 73),
-     "ANTHROPIC'S $81BN IPO DEBUTS",
-     "Claude maker lists on Nasdaq at $83; shares close at $97.17, up 17%.",
-     icon_chart),
-    ("SPACE · SCIENCE", (23, 80, 130),
-     "VOYAGER 1 A LIGHT-DAY AWAY",
-     "NASA confirms the probe is 16 billion miles out, a record for any craft.",
-     icon_probe),
-    ("SOUTH ASIA · WEATHER", (14, 124, 123),
-     "CYCLONE AKVAN BEARS DOWN",
-     "Severe storm nears India's east coast; landfall due Friday, winds to 110 km/h.",
-     icon_cyclone),
+def icon_cyclone(d, cx, cy, r, col):
+    for k in range(5):
+        r0 = 8 + k * 7
+        start = k * 55
+        d.arc([cx - r0, cy - r0, cx + r0, cy + r0], start, start + 250,
+              fill=col, width=5)
+    d.ellipse([cx - 4, cy - 4, cx + 4, cy + 4], fill=col)
+    # wind streaks
+    for yy, ln in [(-r * 0.9, 26), (r * 0.9, 30)]:
+        d.line([cx - r - 6, cy + yy, cx - r - 6 + ln, cy + yy],
+               fill=col, width=4)
+
+
+ICONS = {
+    "globe": icon_globe,
+    "scales": icon_scales,
+    "bridge": icon_bridge,
+    "chart": icon_chart,
+    "probe": icon_probe,
+    "cyclone": icon_cyclone,
+}
+
+PANELS = [
+    ("globe", (20, 33, 61),
+     "TRUMP, XI & PUTIN MEET IN SHENZHEN",
+     "First-ever trilateral summit ends with a four-point declaration. No deal on Ukraine."),
+    ("scales", (0, 121, 107),
+     "ICJ: MYANMAR COMMITTED GENOCIDE",
+     "Court rules 9\u20136 against Myanmar over the Rohingya. Reparations ordered."),
+    ("bridge", (176, 74, 20),
+     "CRIMEA BRIDGE HIT A THIRD TIME",
+     "Neptune missiles damage the rail span. Traffic halted across the strait."),
+    ("chart", (46, 125, 50),
+     "ANTHROPIC IPO: $81.3BN, A RECORD",
+     "Priced at $83, first trade $111.50, closed $97.17 \u2014 up 17% on Nasdaq."),
+    ("probe", (74, 44, 130),
+     "VOYAGER 1: ONE LIGHT-DAY AWAY",
+     "NASA confirms the probe is 16 billion miles out, 50 years after launch."),
+    ("cyclone", (2, 119, 189),
+     "CYCLONE AKVAN NEARS INDIA",
+     "Landfall due Friday on the east coast, with winds up to 110 km/h."),
 ]
 
 
 def main():
-    img = Image.new("RGB", (W, H), CREAM)
+    img = Image.new("RGB", (W, H), PAPER)
     d = ImageDraw.Draw(img)
 
-    # masthead
+    # ---- masthead ----
     d.rectangle([0, 0, W, 140], fill=NAVY)
-    f_date = fit(d, "19 NOVEMBER 2026", BOLD, 72, W - 60)
-    d.text((W // 2, 22), "19 NOVEMBER 2026", font=f_date, fill=(255, 255, 255),
-           anchor="ma")
-    f_sub = font(REG, 25)
-    d.text((W // 2, 100),
-           "T H U R S D A Y   ·   T H E   W O R L D   I N   O N E   I M A G E",
-           font=f_sub, fill=NAVY_LIGHT, anchor="ma")
+    d.rectangle([0, 140, W, 146], fill=GOLD)
+    centre(d, W // 2, 22, "19 NOVEMBER 2026", font(SERIF_B, 62), WHITE)
+    centre(d, W // 2, 100, "T H U R S D A Y  \u00b7  T H E  W O R L D  I N  O N E  I M A G E",
+           font(SANS_B, 21), GOLD)
 
-    # story panels: 2 columns x 3 rows
+    # ---- grid ----
     margin, gap = 16, 12
-    pw = (W - 2 * margin - gap) // 2
-    ph = 262
-    y0 = 156
-    for i, (tag, color, head, sub, icon) in enumerate(STORIES):
-        col, row = i % 2, i // 2
-        x = margin + col * (pw + gap)
-        y = y0 + row * (ph + gap)
-        d.rectangle([x, y, x + pw, y + ph], fill=CARD, outline=BORDER, width=2)
-        d.rectangle([x, y, x + pw, y + 10], fill=color)
-        icon(d, x + 18, y + 30, 108, color)
-        tx = x + 140
-        tw = pw - 140 - 18
-        f_tag = font(BOLD, 21)
-        d.text((tx, y + 26), tag, font=f_tag, fill=color)
-        # shrink the headline until it wraps into at most two lines (never truncate)
-        size = 36
-        while len(wrap(d, head, font(BOLD, size), tw, max_lines=99)) > 2 and size > 20:
-            size -= 2
-        f_head = font(BOLD, size)
-        head_lines = wrap(d, head, f_head, tw, max_lines=2)
-        for j, line in enumerate(head_lines):
-            d.text((tx, y + 56 + j * 40), line, font=f_head, fill=INK)
-        f_sub2 = font(REG, 24)
-        sub_lines = wrap(d, sub, f_sub2, tw, max_lines=3)
-        sy = y + 56 + len(head_lines) * 40 + 8
-        for j, line in enumerate(sub_lines):
-            d.text((tx, sy + j * 28), line, font=f_sub2, fill=GREY)
+    pw = (W - 2 * margin - gap) // 2          # 492
+    ph = (H - 152 - 56 - 2 * gap) // 3        # 264
+    top0 = 158
+    head_f = font(SANS_B, 28)
+    body_f = font(SANS, 20)
 
-    # footer
-    f_foot = font(REG, 21)
-    d.text((W // 2, 984),
+    for i, (icon, col, headline, body) in enumerate(PANELS):
+        col_i, row_i = i % 2, i // 2
+        x0 = margin + col_i * (pw + gap)
+        y0 = top0 + row_i * (ph + gap)
+        x1, y1 = x0 + pw, y0 + ph
+        d.rectangle([x0, y0, x1, y1], fill=WHITE, outline=(200, 194, 178),
+                    width=2)
+        d.rectangle([x0, y0, x1, y0 + 9], fill=col)
+        # icon in a tinted disc
+        cx, cy = x0 + pw // 2, y0 + 62
+        d.ellipse([cx - 46, cy - 46, cx + 46, cy + 46], fill=(238, 236, 228))
+        d.ellipse([cx - 46, cy - 46, cx + 46, cy + 46], outline=col, width=3)
+        ICONS[icon](d, cx, cy, 34, col)
+        # headline, centred, up to 2 lines
+        hlines = wrap(d, headline, head_f, pw - 36)
+        hy = y0 + 122
+        for ln in hlines[:2]:
+            centre(d, x0 + pw // 2, hy, ln, head_f, INK)
+            hy += 33
+        # body, centred, up to 2 lines
+        blines = wrap(d, body, body_f, pw - 44)
+        by = y0 + 196
+        for ln in blines[:2]:
+            centre(d, x0 + pw // 2, by, ln, body_f, GREY)
+            by += 26
+
+    # ---- footer ----
+    d.rectangle([0, H - 56, W, H], fill=FOOT_BG)
+    centre(d, W // 2, H - 44,
            "Every story above happened or was first reported on 19 November 2026.",
-           font=f_foot, fill=GREY, anchor="ma")
+           font(SANS, 21), WHITE)
 
-    out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "entry.png")
-    img.save(out, "PNG", optimize=True)
-    print("wrote", out, os.path.getsize(out), "bytes")
+    img.save(OUT, optimize=True)
+    print("saved", OUT, img.size)
 
 
 if __name__ == "__main__":

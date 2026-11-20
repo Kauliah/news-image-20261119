@@ -1,14 +1,17 @@
-// news-image-20261119 entry (Node 22, standard library only).
-// The program writes the image beside this file to the output directory
-// make.fun grades: /output, or MAKEFUN_OUTPUT_DIR when run locally:
-//   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
-// The image is entry.png, drawn by draw-image.py in this repository from
-// six verified stories of Thursday 19 November 2026.
+import { copyFileSync, existsSync, mkdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-import { copyFileSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+// Copies the finished news image into the make.fun output directory.
+const outDir = process.env.MAKEFUN_OUTPUT_DIR ?? "out";
+const here = dirname(fileURLToPath(import.meta.url));
+const src = join(here, "entry.png");
+const dest = join(outDir, "entry.png");
 
-const outDir = process.env.MAKEFUN_OUTPUT_DIR ?? "/output";
+if (!existsSync(src)) {
+  console.error("entry.png not found next to main.ts");
+  process.exit(1);
+}
 mkdirSync(outDir, { recursive: true });
-const src = new URL("./entry.png", import.meta.url);
-copyFileSync(src, join(outDir, "entry.png"));
+copyFileSync(src, dest);
+console.log(`wrote ${dest}`);

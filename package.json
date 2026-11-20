@@ -1,1 +1,1 @@
-{"type":"module"}
+{"name":"news-image-20261119","private":true,"scripts":{"build":"python3 draw-image.py","start":"node main.ts"},"type":"module","version":"1.0.0"}
